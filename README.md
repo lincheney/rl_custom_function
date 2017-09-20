@@ -37,7 +37,7 @@ The name the function will be bound to is the filename of the .so
 
 ## Example
 
-There is a very simple example in `example/hello_world.rs`.
+There is a very simple example in [example/hello_world.rs](example/hello_world.rs).
 
 Compile it by running:
 ```bash
@@ -49,7 +49,7 @@ Then add a binding to your `~/.inputrc`:
 "\C-g": hello_world
 ```
 
-Run a something interactive that uses readline, e.g. python:
+Run something interactive that uses readline, e.g. python:
 ```bash
 LD_PRELOAD=target/release/librl_custom_function.so \
 READLINE_CUSTOM_FUNCTION_LIBS=./hello_world.so \
