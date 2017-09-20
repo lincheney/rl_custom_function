@@ -8,6 +8,7 @@ use std::os::unix::ffi::{OsStringExt, OsStrExt};
 use std::sync::{Once, ONCE_INIT};
 
 mod readline {
+    #[allow(non_camel_case_types)]
     pub type rl_command_func_t = extern fn(isize, isize) -> isize;
 
     #[link(name = "readline")]
