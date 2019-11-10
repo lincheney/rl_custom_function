@@ -3,7 +3,7 @@ extern crate lazy_static;
 extern crate libc;
 
 use std::env;
-use std::ffi::{OsStr, OsString, CString};
+use std::ffi::OsStr;
 use std::os::unix::ffi::{OsStringExt, OsStrExt};
 use std::sync::Once;
 
@@ -53,7 +53,7 @@ mod readline {
     pub use self::lib::rl_initialize_funmap;
 
     pub fn add_function(name: &[u8], function: lib::rl_command_func_t) {
-        let name = ::CString::new(name).unwrap();
+        let name = std::ffi::CString::new(name).unwrap();
         unsafe{ lib::rl_add_funmap_entry(name.as_ptr(), function) };
         // readline now owns the string
         ::std::mem::forget(name);
@@ -71,8 +71,8 @@ mod readline {
     }
 }
 
-fn add_function(name: &[u8]) -> Result<(), OsString> {
-    let name_cstr = CString::new(name).unwrap();
+fn add_function(name: &[u8]) -> Result<(), std::ffi::OsString> {
+    let name_cstr = std::ffi::CString::new(name).unwrap();
 
     unsafe{ dynlib_call!(dlopen(name_cstr.as_ptr(), ::libc::RTLD_LAZY)) }.and_then(|lib|
         unsafe{ dlsym_lookup!(lib, "rl_custom_function") }.map(|func| {
