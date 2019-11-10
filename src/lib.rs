@@ -10,24 +10,30 @@ use std::sync::Once;
 macro_rules! dynlib_call {
     ($func:ident($($args:expr),*)) => {{
         let ptr = {
-            use ::libc::$func;
+            use libc::$func;
             $func($($args),*)
         };
         if ptr.is_null() {
-            use std::os::unix::ffi::OsStrExt;
-            let error = ::libc::dlerror();
-            let error = ::std::ffi::CStr::from_ptr(error).to_bytes();
-            let error = ::std::ffi::OsStr::from_bytes(error).to_os_string();
-            Err(error)
+            let error = libc::dlerror();
+            if error.is_null() {
+                Err(concat!("unknown error calling: ", stringify!($func)))
+            } else {
+                Err(std::ffi::CStr::from_ptr(error).to_str().unwrap())
+            }
         } else {
             Ok(ptr)
         }
     }}
 }
 
-macro_rules! dlsym_lookup {
+macro_rules! dlopen {
+    ($name:expr) => { dlopen!($name, libc::RTLD_LAZY) };
+    ($name:expr, $flags:expr) => { dynlib_call!(dlopen($name.as_ptr() as _, $flags)) };
+}
+
+macro_rules! dlsym {
     ($handle:expr, $name:expr) => {
-        dlsym_lookup!($handle, $name, _)
+        dlsym!($handle, $name, _)
     };
     ($handle:expr, $name:expr, $type:ty) => {{
         let name = concat!($name, "\0");
@@ -38,17 +44,6 @@ macro_rules! dlsym_lookup {
     }}
 }
 
-macro_rules! readline_dylsym {
-    ($name:expr) => {
-        readline_dylsym!($name, _)
-    };
-    ($name:expr, $type:ty) => {
-        dynlib_call!(dlopen(b"libreadline.so\0".as_ptr() as _, ::libc::RTLD_LAZY)).and_then(|lib|
-            dlsym_lookup!(lib, $name)
-        )
-    }
-}
-
 mod readline {
     pub use self::lib::rl_initialize_funmap;
 
@@ -56,26 +51,41 @@ mod readline {
         let name = std::ffi::CString::new(name).unwrap();
         unsafe{ lib::rl_add_funmap_entry(name.as_ptr(), function) };
         // readline now owns the string
-        ::std::mem::forget(name);
+        std::mem::forget(name);
     }
 
-    #[allow(non_upper_case_globals)]
+    #[allow(non_upper_case_globals, non_camel_case_types)]
     mod lib {
-        #[allow(non_camel_case_types)]
+        use std::marker::PhantomData;
         pub type rl_command_func_t = extern fn(isize, isize) -> isize;
 
-        lazy_static! {
-            pub static ref rl_initialize_funmap: unsafe extern fn() = unsafe{ readline_dylsym!("rl_initialize_funmap") }.unwrap();
-            pub static ref rl_add_funmap_entry: unsafe extern fn(*const i8, rl_command_func_t) -> isize = unsafe{ readline_dylsym!("rl_add_funmap_entry") }.unwrap();
+        pub struct Pointer<T>(usize, PhantomData<T>);
+        impl<T> Pointer<T> {
+            pub fn new(ptr: *mut T)    -> Self { Self(ptr as _, PhantomData) }
+            pub fn is_null(&self)      -> bool { self.0 == 0 }
+            pub fn ptr(&self)        -> *mut T { self.0 as *mut T }
+            pub unsafe fn set(&self, value: T) { *self.ptr() = value; }
         }
+
+        lazy_static! {
+            static ref libreadline: Pointer<libc::c_void> = Pointer::new(unsafe{ dlopen!(b"libreadline.so\0") }.unwrap());
+        }
+        macro_rules! readline_lookup {
+            ($name:ident: $type:ty) => {
+                lazy_static! { pub static ref $name: $type = unsafe{ dlsym!(libreadline.ptr(), stringify!($name)) }.unwrap(); }
+            }
+        }
+
+        readline_lookup!(rl_initialize_funmap: unsafe extern fn());
+        readline_lookup!(rl_add_funmap_entry:  unsafe extern fn(*const i8, rl_command_func_t) -> isize);
     }
 }
 
-fn add_function(name: &[u8]) -> Result<(), std::ffi::OsString> {
+fn add_function(name: &[u8]) -> Result<(), &str> {
     let name_cstr = std::ffi::CString::new(name).unwrap();
 
-    unsafe{ dynlib_call!(dlopen(name_cstr.as_ptr(), ::libc::RTLD_LAZY)) }.and_then(|lib|
-        unsafe{ dlsym_lookup!(lib, "rl_custom_function") }.map(|func| {
+    unsafe{ dlopen!(name_cstr) }.and_then(|lib|
+        unsafe{ dlsym!(lib, "rl_custom_function") }.map(|func| {
             // use filename as command name
             let command = std::path::Path::new(OsStr::from_bytes(name)).file_stem().unwrap();
             readline::add_function(command.as_bytes(), func);
