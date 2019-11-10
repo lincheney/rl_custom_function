@@ -7,30 +7,43 @@ use std::ffi::{OsStr, OsString, CStr, CString};
 use std::os::unix::ffi::{OsStringExt, OsStrExt};
 use std::sync::Once;
 
+macro_rules! dlsym_lookup {
+    ($handle:expr, $name:expr) => {
+        dlsym_lookup!($handle, $name, _)
+    };
+    ($handle:expr, $name:expr, $result:ty) => {{
+        let name = concat!($name, "\0");
+        let func = libc::dlsym($handle, name.as_ptr() as *const i8);
+        if func.is_null() {
+            None
+        } else {
+            Some(std::mem::transmute::<_, $result>(func))
+        }
+    }}
+}
+
 mod readline {
+    use libc::{RTLD_NEXT, RTLD_DEFAULT};
+
     #[allow(non_camel_case_types)]
     pub type rl_command_func_t = extern fn(isize, isize) -> isize;
 
-    #[link(name = "readline")]
-    extern {
-        fn rl_add_funmap_entry(name: *const u8, function: rl_command_func_t) -> isize;
+    fn rl_add_funmap_entry(name: *const u8, function: rl_command_func_t) -> isize {
+        let func = unsafe{ dlsym_lookup!(RTLD_DEFAULT, "rl_add_funmap_entry", fn(*const u8, rl_command_func_t)->isize) };
+        let func = func.expect("could not find symbol rl_add_funmap_entry");
+        func(name, function)
     }
 
     pub fn add_function(name: &[u8], function: rl_command_func_t) {
         let name = ::CString::new(name).unwrap();
-        unsafe{ rl_add_funmap_entry(name.as_ptr() as *const u8, function) };
+        rl_add_funmap_entry(name.as_ptr() as *const u8, function);
         // readline now owns the string
         ::std::mem::forget(name);
     }
 
     lazy_static! {
         pub static ref RL_INITIALIZE_FUNMAP: unsafe extern fn() = {
-            let name = "rl_initialize_funmap\0";
-            let func = unsafe{ ::libc::dlsym(::libc::RTLD_NEXT, name.as_ptr() as *const i8) };
-            if func.is_null() {
-                panic!("could not find symbol {}", name);
-            }
-            unsafe{ ::std::mem::transmute(func) }
+            unsafe{ dlsym_lookup!(RTLD_NEXT, "rl_initialize_funmap") }.expect("could not find rl_initialize_funmap")
         };
     }
 }
@@ -40,9 +53,7 @@ fn add_function(name: &[u8]) -> Result<(), OsString> {
 
     let lib = unsafe{ ::libc::dlopen(name_cstr.as_ptr() as *const i8, ::libc::RTLD_NOW) };
     if ! lib.is_null() {
-        let func = unsafe{ ::libc::dlsym(lib, b"rl_custom_function\0".as_ptr() as *const i8) };
-        if ! func.is_null() {
-            let func = unsafe{ ::std::mem::transmute(func) };
+        if let Some(func) = unsafe{ dlsym_lookup!(lib, "rl_custom_function") } {
             // use filename as command name
             let command = std::path::Path::new(OsStr::from_bytes(name)).file_stem().unwrap();
             readline::add_function(command.as_bytes(), func);
