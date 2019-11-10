@@ -5,7 +5,7 @@ extern crate libc;
 use std::env;
 use std::ffi::{OsStr, OsString, CStr, CString};
 use std::os::unix::ffi::{OsStringExt, OsStrExt};
-use std::sync::{Once, ONCE_INIT};
+use std::sync::Once;
 
 mod readline {
     #[allow(non_camel_case_types)]
@@ -53,10 +53,10 @@ fn add_function(name: &[u8]) -> Result<(), OsString> {
     let error = unsafe{ ::libc::dlerror() };
     let error = unsafe{ CStr::from_ptr(error) }.to_bytes();
     let error = OsStr::from_bytes(error).to_os_string();
-    return Err(error)
+    Err(error)
 }
 
-static INIT: Once = ONCE_INIT;
+static INIT: Once = Once::new();
 
 #[no_mangle]
 pub extern fn rl_initialize_funmap() {
