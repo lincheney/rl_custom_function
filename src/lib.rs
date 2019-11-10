@@ -62,21 +62,30 @@ mod readline {
         pub struct Pointer<T>(usize, PhantomData<T>);
         impl<T> Pointer<T> {
             pub fn new(ptr: *mut T)    -> Self { Self(ptr as _, PhantomData) }
-            pub fn is_null(&self)      -> bool { self.0 == 0 }
             pub fn ptr(&self)        -> *mut T { self.0 as *mut T }
             pub unsafe fn set(&self, value: T) { *self.ptr() = value; }
         }
 
         lazy_static! {
-            static ref libreadline: Pointer<libc::c_void> = Pointer::new(unsafe{ dlopen!(b"libreadline.so\0") }.unwrap());
+            pub static ref libreadline: Pointer<libc::c_void> = Pointer::new(unsafe {
+                if dlsym!(libc::RTLD_DEFAULT, "rl_initialize", usize).is_ok() {
+                    libc::RTLD_DEFAULT
+                } else {
+                    dlopen!(b"libreadline.so\0").unwrap()
+                }
+            });
         }
         macro_rules! readline_lookup {
             ($name:ident: $type:ty) => {
-                lazy_static! { pub static ref $name: $type = unsafe{ dlsym!(libreadline.ptr(), stringify!($name)) }.unwrap(); }
+                readline_lookup!($name: $type, libreadline.ptr());
+            };
+            ($name:ident: $type:ty, $handle:expr) => {
+                lazy_static! { pub static ref $name: $type = unsafe{ dlsym!($handle, stringify!($name)) }.unwrap(); }
             }
         }
 
-        readline_lookup!(rl_initialize_funmap: unsafe extern fn());
+        readline_lookup!(rl_initialize_funmap: unsafe extern fn(),
+            if libreadline.ptr() == libc::RTLD_DEFAULT { libc::RTLD_NEXT } else { libreadline.ptr() });
         readline_lookup!(rl_add_funmap_entry:  unsafe extern fn(*const i8, rl_command_func_t) -> isize);
     }
 }
