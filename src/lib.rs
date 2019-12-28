@@ -56,8 +56,8 @@ mod readline {
     pub fn tilde_expand(string: &str) -> ::DynlibResult<String> {
         let string = std::ffi::CString::new(string).unwrap();
         let string = unsafe{ (*lib::tilde_expand)?(string.as_ptr()) };
-        let string = unsafe{ std::ffi::CString::from_raw(string) }.into_string().unwrap();
-        Ok(string)
+        let string = unsafe{ std::ffi::CString::from_raw(string) }.into_string();
+        string.map_err(|_| "tilde_expand: invalid utf-8")
     }
 
     #[allow(non_upper_case_globals, non_camel_case_types)]
