@@ -2,11 +2,6 @@
 extern crate lazy_static;
 extern crate libc;
 
-use std::env;
-use std::ffi::OsStr;
-use std::os::unix::ffi::{OsStringExt, OsStrExt};
-use std::sync::Once;
-
 type DynlibResult<T> = Result<T, &'static str>;
 
 macro_rules! dump_error {
@@ -48,7 +43,7 @@ macro_rules! dlsym {
 }
 
 mod readline {
-    pub use self::lib::rl_initialize_funmap;
+    pub use self::lib::rl_parse_and_bind;
 
     pub fn add_function(name: &[u8], function: lib::rl_command_func_t) -> ::DynlibResult<()> {
         let name = std::ffi::CString::new(name).unwrap();
@@ -56,6 +51,13 @@ mod readline {
         // readline now owns the string
         std::mem::forget(name);
         Ok(())
+    }
+
+    pub fn tilde_expand(string: &str) -> ::DynlibResult<String> {
+        let string = std::ffi::CString::new(string).unwrap();
+        let string = unsafe{ (*lib::tilde_expand)?(string.as_ptr()) };
+        let string = unsafe{ std::ffi::CString::from_raw(string) }.into_string().unwrap();
+        Ok(string)
     }
 
     #[allow(non_upper_case_globals, non_camel_case_types)]
@@ -77,37 +79,36 @@ mod readline {
             }
         }
 
-        readline_lookup!(rl_initialize_funmap: unsafe extern fn(); libc::RTLD_NEXT);
         readline_lookup!(rl_add_funmap_entry:  unsafe extern fn(*const i8, rl_command_func_t) -> isize);
+        readline_lookup!(rl_parse_and_bind:  unsafe extern fn(*mut i8) -> isize; libc::RTLD_NEXT);
+        readline_lookup!(tilde_expand:  unsafe extern fn(*const i8) -> *mut i8);
     }
 }
 
-fn add_function(name: &[u8]) -> DynlibResult<()> {
-    let name_cstr = std::ffi::CString::new(name).unwrap();
-
-    let lib = unsafe{ dynlib_call!(dlopen(name_cstr.as_ptr() as _, libc::RTLD_LAZY)) }?;
+fn add_function(name: &str, path: &str) -> DynlibResult<()> {
+    let path = std::ffi::CString::new(path).unwrap();
+    let lib = unsafe{ dynlib_call!(dlopen(path.as_ptr() as _, libc::RTLD_LAZY)) }?;
     let func = unsafe{ dlsym!(lib, "rl_custom_function") }?;
-    // use filename as command name
-    let command = std::path::Path::new(OsStr::from_bytes(name)).file_stem().unwrap();
-    readline::add_function(command.as_bytes(), func)
+    readline::add_function(name.as_bytes(), func)
 }
 
-static INIT: Once = Once::new();
-
 #[no_mangle]
-pub extern fn rl_initialize_funmap() {
-    INIT.call_once(|| {
-        if let Some(value) = env::var_os("READLINE_CUSTOM_FUNCTION_LIBS") {
-            let value = value.into_vec();
+pub extern fn rl_parse_and_bind(string: *mut i8) -> isize {
+    if ! string.is_null() {
+        let string = unsafe{ std::ffi::CStr::from_ptr(string) }.to_str().unwrap();
+        let mut parts = string.trim_start().splitn(4, char::is_whitespace);
+        let directive = parts.next().unwrap_or("");
+        let plugin = parts.next().unwrap_or("");
+        let name = parts.next().unwrap_or("");
+        let path = parts.next().unwrap_or("");
 
-            for part in value.split(|c| *c == b':') {
-                if let Err(e) = add_function(part) {
-                    let part = OsStr::from_bytes(part);
-                    eprintln!("Error loading {:?}: {:?}", part, e);
-                }
+        if directive == "$include" && plugin == "plugin" {
+            if let Err(e) = readline::tilde_expand(path).and_then(|s| add_function(name, &s)) {
+                eprintln!("Error loading {:?}: {:?}", path, e);
+                return 1
             }
+            return 0
         }
-    });
-
-    unsafe{ dump_error!(*readline::rl_initialize_funmap, ())() }
+    }
+    unsafe{ dump_error!(*readline::rl_parse_and_bind, 1)(string) }
 }
