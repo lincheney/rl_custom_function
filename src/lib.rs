@@ -102,7 +102,7 @@ pub extern fn rl_parse_and_bind(string: *mut i8) -> isize {
         let name = parts.next().unwrap_or("");
         let path = parts.next().unwrap_or("");
 
-        if directive == "$include" && plugin == "plugin" {
+        if directive == "$include" && plugin == "function" {
             if let Err(e) = readline::tilde_expand(path).and_then(|s| add_function(name, &s)) {
                 eprintln!("Error loading {:?}: {:?}", path, e);
                 return 1

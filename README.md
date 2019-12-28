@@ -22,38 +22,36 @@ The resulting lib should be at: `target/release/librl_custom_function.so`
 
 ## Usage
 
-Custom functions are loaded from the environment variable
-`READLINE_CUSTOM_FUNCTION_LIBS`.
-It should be a colon delimited list of paths to shared objects
-containing the custom function.
-
-The shared object should export a function conforming to:
+Custom functions can be loaded via readline init files
+(e.g. `~/.inputrc`, or equivalently `rl_parse_bind`)
+using a `$include` directive like so:
+```
+$include function FUNCTION PATH
+"\C-g": FUNCTION
+```
+where `PATH` is a path to shared object that exports a function conforming to:
 ```c
 typedef int rl_command_func_t (int, int);
 ```
-
-The name the function will be bound to is the filename of the .so
-(excepting the extension).
 
 ## Example
 
 There is a very simple example in [example/hello_world.rs](example/hello_world.rs).
 
-Compile it by running:
+Compile the function by running:
 ```bash
 rustc example/hello_world.rs -o hello_world.so
 ```
 
-Then add a binding to your `~/.inputrc`:
+Then add to your `~/.inputrc`:
 ```
+$include function hello_world /path/to/hello_world.so
 "\C-g": hello_world
 ```
 
 Run something interactive that uses readline, e.g. python:
 ```bash
-LD_PRELOAD=target/release/librl_custom_function.so \
-READLINE_CUSTOM_FUNCTION_LIBS=./hello_world.so \
-python
+LD_PRELOAD=target/release/librl_custom_function.so python
 ```
 
 ... and press control-g.
