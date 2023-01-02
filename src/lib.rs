@@ -2,6 +2,8 @@
 extern crate lazy_static;
 extern crate libc;
 
+use std::os::raw::c_char;
+
 type DynlibResult<T> = Result<T, &'static str>;
 
 macro_rules! dump_error {
@@ -93,7 +95,7 @@ fn add_function(name: &str, path: &str) -> DynlibResult<()> {
 }
 
 #[no_mangle]
-pub extern fn rl_parse_and_bind(string: *mut i8) -> isize {
+pub extern fn rl_parse_and_bind(string: *mut c_char) -> isize {
     if ! string.is_null() {
         let string = unsafe{ std::ffi::CStr::from_ptr(string) }.to_str().unwrap();
         let mut parts = string.trim_start().splitn(4, char::is_whitespace);
