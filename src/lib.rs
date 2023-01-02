@@ -64,6 +64,8 @@ mod readline {
 
     #[allow(non_upper_case_globals, non_camel_case_types)]
     mod lib {
+        use std::os::raw::c_char;
+
         pub type rl_command_func_t = extern fn(isize, isize) -> isize;
 
         macro_rules! readline_lookup {
@@ -81,9 +83,9 @@ mod readline {
             }
         }
 
-        readline_lookup!(rl_add_funmap_entry:  unsafe extern fn(*const i8, rl_command_func_t) -> isize);
-        readline_lookup!(rl_parse_and_bind:  unsafe extern fn(*mut i8) -> isize; libc::RTLD_NEXT);
-        readline_lookup!(tilde_expand:  unsafe extern fn(*const i8) -> *mut i8);
+        readline_lookup!(rl_add_funmap_entry:  unsafe extern fn(*const c_char, rl_command_func_t) -> isize);
+        readline_lookup!(rl_parse_and_bind:  unsafe extern fn(*mut c_char) -> isize; libc::RTLD_NEXT);
+        readline_lookup!(tilde_expand:  unsafe extern fn(*const c_char) -> *mut c_char);
     }
 }
 
