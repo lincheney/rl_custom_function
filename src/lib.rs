@@ -4,7 +4,7 @@ extern crate libc;
 
 use std::os::raw::c_char;
 
-type DynlibResult<T> = Result<T, &'static str>;
+type DynlibResult<T> = Result<T, String>;
 
 macro_rules! dump_error {
     ($result:expr, $default:expr) => {
@@ -21,9 +21,9 @@ macro_rules! dynlib_call {
         if ptr.is_null() {
             let error = libc::dlerror();
             if error.is_null() {
-                Err(concat!("unknown error calling: ", stringify!($func)))
+                Err(concat!("unknown error calling: ", stringify!($func)).to_string())
             } else {
-                Err(std::ffi::CStr::from_ptr(error).to_str().unwrap())
+                Err(std::ffi::CStr::from_ptr(error).to_str().unwrap().to_string())
             }
         } else {
             Ok(ptr)
@@ -49,7 +49,7 @@ mod readline {
 
     pub fn add_function(name: &[u8], function: lib::rl_command_func_t) -> ::DynlibResult<()> {
         let name = std::ffi::CString::new(name).unwrap();
-        unsafe{ (*lib::rl_add_funmap_entry)?(name.as_ptr(), function) };
+        unsafe{ (*lib::rl_add_funmap_entry).as_ref()?(name.as_ptr(), function) };
         // readline now owns the string
         std::mem::forget(name);
         Ok(())
@@ -57,9 +57,9 @@ mod readline {
 
     pub fn tilde_expand(string: &str) -> ::DynlibResult<String> {
         let string = std::ffi::CString::new(string).unwrap();
-        let string = unsafe{ (*lib::tilde_expand)?(string.as_ptr()) };
+        let string = unsafe{ (*lib::tilde_expand).as_ref()?(string.as_ptr()) };
         let string = unsafe{ std::ffi::CString::from_raw(string) }.into_string();
-        string.map_err(|_| "tilde_expand: invalid utf-8")
+        string.map_err(|_| "tilde_expand: invalid utf-8".to_string())
     }
 
     #[allow(non_upper_case_globals, non_camel_case_types)]
@@ -114,5 +114,5 @@ pub extern fn rl_parse_and_bind(string: *mut c_char) -> isize {
             return 0
         }
     }
-    unsafe{ dump_error!(*readline::rl_parse_and_bind, 1)(string) }
+    unsafe{ dump_error!(&*readline::rl_parse_and_bind, 1)(string) }
 }
