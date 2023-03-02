@@ -75,14 +75,17 @@ mod readline {
 
         static libreadline: Lazy<::DynlibResult<Lib>> = Lazy::new(|| unsafe {
             unsafe extern "C" fn callback(info: *mut libc::dl_phdr_info, _size: usize, data: *mut c_void) -> libc::c_int {
-                if let Ok(lib) = dynlib_call!(dlopen((*info).dlpi_name, libc::RTLD_GLOBAL | libc::RTLD_LAZY)) {
-                    let symbol: ::DynlibResult<*const c_char> = dlsym!(lib, "rl_library_version");
-                    if symbol.is_ok() {
-                        *(data as *mut *mut c_void) = lib;
-                        return 1
+                let dlpi_name = (*info).dlpi_name;
+                if std::ffi::CStr::from_ptr(dlpi_name).to_str().unwrap().contains("/libreadline.so") {
+                    if let Ok(lib) = dynlib_call!(dlopen(dlpi_name, libc::RTLD_GLOBAL | libc::RTLD_LAZY)) {
+                        let symbol: ::DynlibResult<*const c_char> = dlsym!(lib, "rl_library_version");
+                        if symbol.is_ok() {
+                            *(data as *mut *mut c_void) = lib;
+                            return 1 // break
+                        }
                     }
                 }
-                0
+                0 // continue
             }
             let mut lib: *mut c_void = std::ptr::null_mut();
             libc::dl_iterate_phdr(Some(callback), &mut lib as *mut *mut c_void as _);
