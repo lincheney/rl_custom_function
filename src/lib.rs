@@ -1,5 +1,4 @@
-#[macro_use]
-extern crate lazy_static;
+extern crate once_cell;
 extern crate libc;
 
 use std::os::raw::c_char;
@@ -65,40 +64,46 @@ mod readline {
     #[allow(non_upper_case_globals, non_camel_case_types)]
     mod lib {
         use std::os::raw::c_char;
+        use libc::c_void;
+        use once_cell::sync::Lazy;
 
         pub type rl_command_func_t = extern fn(isize, isize) -> isize;
+
+        struct Lib(*mut c_void);
+        unsafe impl Sync for Lib {}
+        unsafe impl Send for Lib {}
+
+        static libreadline: Lazy<::DynlibResult<Lib>> = Lazy::new(|| unsafe {
+            unsafe extern "C" fn callback(info: *mut libc::dl_phdr_info, _size: usize, data: *mut c_void) -> libc::c_int {
+                if let Ok(lib) = dynlib_call!(dlopen((*info).dlpi_name, libc::RTLD_NOLOAD | libc::RTLD_LAZY)) {
+                    let symbol: ::DynlibResult<*const c_char> = dlsym!(lib, "rl_library_version");
+                    if symbol.is_ok() {
+                        *(data as *mut *mut c_void) = lib;
+                        return 1
+                    }
+                }
+                0
+            }
+            let mut lib: *mut c_void = std::ptr::null_mut();
+            libc::dl_iterate_phdr(Some(callback), &mut lib as *mut *mut c_void as _);
+
+            if lib.is_null() {
+                dynlib_call!(dlopen(b"libreadline.so\0".as_ptr() as _, libc::RTLD_NOLOAD | libc::RTLD_LAZY)).map(|lib| Lib(lib))
+            } else {
+                Ok(Lib(lib))
+            }
+        });
 
         macro_rules! readline_lookup {
             ($name:ident: $type:ty) => {
                 readline_lookup!($name: $type; libc::RTLD_DEFAULT);
             };
             ($name:ident: $type:ty; $handle:expr) => {
-                lazy_static! {
-                    pub static ref $name: ::DynlibResult<$type> = unsafe {
-                        dlsym!($handle, stringify!($name)).or_else(|_| {
-
-                            // let symbol: Option<::DynlibResult<$type>> = None;
-                            unsafe extern "C" fn callback(info: *mut libc::dl_phdr_info, _size: usize, data: *mut libc::c_void) -> libc::c_int {
-                                let lib = dynlib_call!(dlopen((*info).dlpi_name, libc::RTLD_NOLOAD | libc::RTLD_LAZY));
-                                if let Ok(lib) = lib {
-                                    let symbol: ::DynlibResult<*const c_char> = dlsym!(lib, "rl_library_version");
-                                    if symbol.is_ok() {
-                                        *(data as *mut *mut libc::c_void) = lib;
-                                        return 1
-                                    }
-                                }
-                                0
-                            }
-                            let mut lib: *mut libc::c_void = std::ptr::null_mut();
-                            libc::dl_iterate_phdr(Some(callback), &mut lib as *mut *mut libc::c_void as _);
-
-                            if lib.is_null() {
-                                dynlib_call!(dlopen(b"libreadline.so\0".as_ptr() as _, libc::RTLD_NOLOAD | libc::RTLD_LAZY))
-                            } else {
-                                Ok(lib)
-                            }.and_then(|lib| dlsym!(lib, stringify!($name)))
-                        })};
-                }
+                pub static $name: Lazy<::DynlibResult<$type>> = Lazy::new(|| unsafe {
+                    dlsym!($handle, stringify!($name)).or_else(|_|
+                        (*libreadline).as_ref().map_err(|s| s.clone()).and_then(|lib| dlsym!(lib.0, stringify!($name)))
+                    )
+                });
             }
         }
 
