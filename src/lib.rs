@@ -75,10 +75,29 @@ mod readline {
             ($name:ident: $type:ty; $handle:expr) => {
                 lazy_static! {
                     pub static ref $name: ::DynlibResult<$type> = unsafe {
-                        dlsym!($handle, stringify!($name)).or_else(|_|
-                            dynlib_call!(dlopen(b"libreadline.so\0".as_ptr() as _, libc::RTLD_NOLOAD | libc::RTLD_LAZY))
-                            .and_then(|lib| dlsym!(lib, stringify!($name)))
-                        )};
+                        dlsym!($handle, stringify!($name)).or_else(|_| {
+
+                            // let symbol: Option<::DynlibResult<$type>> = None;
+                            unsafe extern "C" fn callback(info: *mut libc::dl_phdr_info, _size: usize, data: *mut libc::c_void) -> libc::c_int {
+                                let lib = dynlib_call!(dlopen((*info).dlpi_name, libc::RTLD_NOLOAD | libc::RTLD_LAZY));
+                                if let Ok(lib) = lib {
+                                    let symbol: ::DynlibResult<*const c_char> = dlsym!(lib, "rl_library_version");
+                                    if symbol.is_ok() {
+                                        *(data as *mut *mut libc::c_void) = lib;
+                                        return 1
+                                    }
+                                }
+                                0
+                            }
+                            let mut lib: *mut libc::c_void = std::ptr::null_mut();
+                            libc::dl_iterate_phdr(Some(callback), &mut lib as *mut *mut libc::c_void as _);
+
+                            if lib.is_null() {
+                                dynlib_call!(dlopen(b"libreadline.so\0".as_ptr() as _, libc::RTLD_NOLOAD | libc::RTLD_LAZY))
+                            } else {
+                                Ok(lib)
+                            }.and_then(|lib| dlsym!(lib, stringify!($name)))
+                        })};
                 }
             }
         }
